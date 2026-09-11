@@ -15,7 +15,7 @@ Node 20+ and nothing else. `deploy.mjs` imports only node builtins and
 `node_modules/`.
 
 ```sh
-cp .env.example .env    # fill in HAPPYVIEW_URL, HAPPYVIEW_API_KEY, SERVICE_DID
+cp .env.example .env    # replace every placeholder, or blank the ones you lack
 npm run deploy          # or: node scripts/deploy.mjs
 ```
 
@@ -24,6 +24,13 @@ config, attaches the Lua scripts (each one prefixed with `lua/lib/prelude.lua`),
 and pushes the script variables. It reads `.env`, with shell variables winning
 over the file, skips variables that are not set, and every write is an upsert —
 so re-running is safe. `--dry-run` walks the whole plan without writing.
+
+It refuses to start, dry run included, if a script variable still holds its
+`.env.example` placeholder. HappyView accepts `did:plc:xxxx…` as a real value,
+and on 2026-09-03 that is how `SERVICE_DID` reached production: the Lua found
+no roster under the placeholder DID and every admin script failed until the
+variables were set by hand. A blank value is skipped and leaves HappyView's
+copy alone, so blank is the safe choice for anything you do not have.
 
 One manual step remains outside this repo: the **admin API key** (`hv_`) is
 minted in the HappyView dashboard, with permissions for lexicons, scripts,

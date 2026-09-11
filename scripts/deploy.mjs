@@ -17,6 +17,21 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
+ * Parses KEY=value lines into [key, value] pairs, skipping comments and
+ * stripping one layer of quotes. Shared by .env and .env.example so the
+ * placeholder check compares values parsed the same way.
+ */
+function parseDotEnv(text) {
+  const entries = [];
+  for (const line of text.split("\n")) {
+    const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+    if (!match || line.trimStart().startsWith("#")) continue;
+    entries.push([match[1], match[2].trim().replace(/^["'](.*)["']$/, "$1")]);
+  }
+  return entries;
+}
+
+/**
  * Loads .env into process.env without overwriting values already set, so a
  * shell export or CI secret still wins over the file.
  */
@@ -27,11 +42,8 @@ async function loadDotEnv(path) {
   } catch {
     return;
   }
-  for (const line of text.split("\n")) {
-    const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
-    if (!match || line.trimStart().startsWith("#")) continue;
-    const value = match[2].trim().replace(/^["'](.*)["']$/, "$1");
-    if (!(match[1] in process.env)) process.env[match[1]] = value;
+  for (const [key, value] of parseDotEnv(text)) {
+    if (!(key in process.env)) process.env[key] = value;
   }
 }
 
@@ -134,6 +146,34 @@ if (!baseUrl || !apiKey) {
   console.error(
     "Missing config. Set HAPPYVIEW_URL and HAPPYVIEW_API_KEY in .env —\n" +
       "see .env.example."
+  );
+  process.exit(1);
+}
+
+/**
+ * Refuses to push a script variable still holding its .env.example
+ * placeholder. An unset variable is skipped and harmless, but a placeholder is
+ * a real value to HappyView: on 2026-09-03 a deploy pushed did:plc:xxxx… as
+ * SERVICE_DID, the Lua found no roster under that DID, and every admin script
+ * failed on production until the variables were fixed by hand in the dashboard.
+ *
+ * Checked before the first write, and on --dry-run too, so a half-filled .env
+ * stops here instead of after the scripts have been replaced. Scoped to
+ * VARIABLES: HAPPYVIEW_URL's example is the real production URL, and a
+ * placeholder API key already fails loudly with a 401.
+ */
+const examples = new Map(
+  parseDotEnv(await readFile(join(ROOT, ".env.example"), "utf8"))
+);
+const placeholders = VARIABLES.map(({ key }) => key).filter((key) => {
+  const value = process.env[key];
+  return value && value === examples.get(key);
+});
+if (placeholders.length) {
+  console.error(
+    `Refusing to deploy: ${placeholders.join(", ")} still set to the ` +
+      ".env.example placeholder.\n" +
+      "Set the real value, or leave it blank to keep what HappyView has."
   );
   process.exit(1);
 }
